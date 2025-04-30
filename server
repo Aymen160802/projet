@@ -1,0 +1,77 @@
+from flask import Flask, request, jsonify
+import numpy as np
+import random
+
+app = Flask(_name_)
+
+# Initialize Q-table
+q_table = np.zeros((3, 3, 3))  # [last_human][last_ai][action_ai]
+alpha = 0.1
+gamma = 0.9
+epsilon = 0.2
+
+# Store game sessions (in production, use a database)
+sessions = {}
+
+@app.route('/start_game', methods=['POST'])
+def start_game():
+    session_id = request.json.get('session_id') or str(random.randint(1000, 9999))
+    sessions[session_id] = {
+        'last_human': random.randint(0, 2),
+        'last_ai': random.randint(0, 2),
+        'stats': {'wins': 0, 'losses': 0, 'ties': 0}
+    }
+    return jsonify({'session_id': session_id, 'message': 'Game started!'})
+
+def choose_ai_action(session):
+    if random.uniform(0, 1) < epsilon:
+        return random.randint(0, 2)  # Exploration
+    else:
+        return np.argmax(q_table[session['last_human']][session['last_ai']])
+
+def determine_winner(human_action, ai_action):
+    if human_action == ai_action:
+        return 0
+    elif (human_action - ai_action) % 3 == 1:
+        return -1
+    return 1
+
+@app.route('/play', methods=['POST'])
+def play():
+    session_id = request.json['session_id']
+    human_action = request.json['action']
+    
+    if session_id not in sessions:
+        return jsonify({'error': 'Invalid session'}), 400
+    
+    session = sessions[session_id]
+    ai_action = choose_ai_action(session)
+    result = determine_winner(human_action, ai_action)
+    
+    # Update Q-table
+    reward = result
+    old_value = q_table[session['last_human']][session['last_ai']][ai_action]
+    best_next = np.max(q_table[human_action][ai_action])
+    new_value = old_value + alpha * (reward + gamma * best_next - old_value)
+    q_table[session['last_human']][session['last_ai']][ai_action] = new_value
+    
+    # Update session
+    session['last_human'] = human_action
+    session['last_ai'] = ai_action
+    
+    # Update stats
+    if result == 0:
+        session['stats']['ties'] += 1
+    elif result == -1:
+        session['stats']['wins'] += 1
+    else:
+        session['stats']['losses'] += 1
+    
+    return jsonify({
+        'ai_action': ai_action,
+        'result': result,
+        'stats': session['stats']
+    })
+
+if _name_ == '_main_':
+    app.run(host='0.0.0.0', port=5000)
